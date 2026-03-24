@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	rapid "github.com/dvydra/zoekt-rapid"
+	"github.com/dvydra/zoekt-rapid/internal/rapid"
 )
 
 const version = "0.1.0"

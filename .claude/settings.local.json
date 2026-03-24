@@ -36,7 +36,12 @@
       "Bash(go install:*)",
       "Bash(launchctl load:*)",
       "Bash(go get:*)",
-      "Bash(bash /tmp/bench-rapid.sh)"
+      "Bash(bash /tmp/bench-rapid.sh)",
+      "Bash(for f:*)",
+      "Bash(do sed:*)",
+      "Read(//Users/dvydra/src/dvydra/zoekt-rapid/**)",
+      "Bash(done)",
+      "Bash(grep:*)"
     ]
   }
 }

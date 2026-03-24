@@ -41,20 +41,20 @@ zoekt-rapid poll               # run polling loop (debug)
 ## Project layout
 
 ```
-cmd/zoekt-rapid/main.go   — CLI entry point and subcommand dispatch
-*.go (root, package rapid) — library code:
-  config.go                — configuration with defaults
-  discovery.go             — find git repos under configured roots
-  git.go                   — git subprocess helpers (branch/HEAD, porcelain v2 parsing)
-  state.go                 — thread-safe repo state table
-  poller.go                — polling loop (2s repo poll, 60s discovery)
-  trigram.go               — trigram extraction and posting list index
-  delta.go                 — delta index build and regex search
-  proxy.go                 — zoekt API proxy with delta merge
-  server.go                — HTTP server with search, management, and passthrough endpoints
-  reindex.go               — reindex manager with concurrency limiting
-  scheduler.go             — hourly full reindex scheduler
-  watcher.go               — fsnotify watcher for instant file change detection
+cmd/zoekt-rapid/main.go        — CLI entry point and subcommand dispatch
+internal/rapid/                 — library code (package rapid):
+  config.go                     — configuration with defaults
+  discovery.go                  — find git repos under configured roots
+  git.go                        — git subprocess helpers (branch/HEAD, porcelain v2 parsing)
+  state.go                      — thread-safe repo state table
+  poller.go                     — polling loop (2s repo poll, 60s discovery)
+  trigram.go                    — trigram extraction and posting list index
+  delta.go                      — delta index build and regex search
+  proxy.go                      — zoekt API proxy with delta merge
+  server.go                     — HTTP server with search, management, and passthrough endpoints
+  reindex.go                    — reindex manager with concurrency limiting
+  scheduler.go                  — hourly full reindex scheduler
+  watcher.go                    — fsnotify watcher for instant file change detection
 ```
 
 ## How delta merge works
