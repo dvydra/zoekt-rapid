@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	rapid "github.com/dvydra/zoekt-rapid"
 )
 
 const version = "0.1.0"
@@ -69,7 +71,7 @@ func cmdDiscover(args []string) {
 	depthFlag := fs.Int("depth", 0, "max scan depth (default: 3)")
 	fs.Parse(args)
 
-	cfg := DefaultConfig()
+	cfg := rapid.DefaultConfig()
 
 	if *rootsFlag != "" {
 		cfg.Roots = strings.Split(*rootsFlag, ",")
@@ -78,7 +80,7 @@ func cmdDiscover(args []string) {
 		cfg.ScanDepth = *depthFlag
 	}
 
-	repos, err := DiscoverRepos(cfg.Roots, cfg.ScanDepth, cfg.ExcludePatterns)
+	repos, err := rapid.DiscoverRepos(cfg.Roots, cfg.ScanDepth, cfg.ExcludePatterns)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -95,7 +97,7 @@ func cmdPoll(args []string) {
 	rootsFlag := fs.String("roots", "", "comma-separated root directories (default: ~/src)")
 	fs.Parse(args)
 
-	cfg := DefaultConfig()
+	cfg := rapid.DefaultConfig()
 	if *rootsFlag != "" {
 		cfg.Roots = strings.Split(*rootsFlag, ",")
 	}
@@ -103,8 +105,8 @@ func cmdPoll(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	state := NewStateTable()
-	poller := NewPoller(cfg, state)
+	state := rapid.NewStateTable()
+	poller := rapid.NewPoller(cfg, state)
 
 	fmt.Fprintln(os.Stderr, "polling repos (ctrl-c to stop)...")
 	poller.Run(ctx)
@@ -117,7 +119,7 @@ func cmdServe(args []string) {
 	zoektFlag := fs.String("zoekt", "", "upstream zoekt URL (default: http://localhost:6070)")
 	fs.Parse(args)
 
-	cfg := DefaultConfig()
+	cfg := rapid.DefaultConfig()
 	if *rootsFlag != "" {
 		cfg.Roots = strings.Split(*rootsFlag, ",")
 	}
@@ -131,24 +133,24 @@ func cmdServe(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	state := NewStateTable()
-	proxy := NewSearchProxy(cfg.ZoektURL, state)
-	reindexMgr := NewReindexManager(cfg, state, proxy)
-	poller := NewPoller(cfg, state)
-	poller.reindex = reindexMgr
-	poller.proxy = proxy
-	scheduler := NewScheduler(cfg, reindexMgr)
-	srv := NewServer(proxy, state, reindexMgr, poller, scheduler, cfg.ProxyPort, cfg.ZoektURL)
+	state := rapid.NewStateTable()
+	proxy := rapid.NewSearchProxy(cfg.ZoektURL, state)
+	reindexMgr := rapid.NewReindexManager(cfg, state, proxy)
+	poller := rapid.NewPoller(cfg, state)
+	poller.Reindex = reindexMgr
+	poller.Proxy = proxy
+	scheduler := rapid.NewScheduler(cfg, reindexMgr)
+	srv := rapid.NewServer(proxy, state, reindexMgr, poller, scheduler, cfg.ProxyPort, cfg.ZoektURL)
 
 	// Refresh repo map from zoekt on startup (needed for smart startup).
 	proxy.RefreshRepoMap()
 
 	// Start fsnotify watcher for instant file change detection.
-	watcher, err := NewWatcher(poller, state, cfg.WatchSkipDirs)
+	watcher, err := rapid.NewWatcher(poller, state, cfg.WatchSkipDirs)
 	if err != nil {
 		log.Printf("fsnotify unavailable, falling back to polling only: %v", err)
 	} else {
-		poller.watcher = watcher
+		poller.Watcher = watcher
 		go watcher.Run()
 		defer watcher.Close()
 	}
@@ -221,7 +223,7 @@ func cmdStatus(args []string) {
 }
 
 func cmdStatusLive(apiURL string, interval time.Duration) {
-	var prev *StatusResponse
+	var prev *rapid.StatusResponse
 	// Track when each repo field last changed, for flash duration.
 	flashes := make(map[string]*statusFlash) // key: "path:field"
 	flashDur := 2 * time.Second
@@ -289,7 +291,7 @@ func cmdStatusLive(apiURL string, interval time.Duration) {
 	}
 }
 
-func fetchStatus(apiURL string) (*StatusResponse, error) {
+func fetchStatus(apiURL string) (*rapid.StatusResponse, error) {
 	resp, err := http.Get(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach zoekt-rapid: %v", err)
@@ -297,7 +299,7 @@ func fetchStatus(apiURL string) (*StatusResponse, error) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	var status StatusResponse
+	var status rapid.StatusResponse
 	if err := json.Unmarshal(body, &status); err != nil {
 		return nil, fmt.Errorf("parse error: %v", err)
 	}
@@ -309,7 +311,7 @@ type statusFlash struct {
 	until time.Time
 }
 
-func renderStatus(status *StatusResponse, prev *StatusResponse, flashes map[string]*statusFlash) {
+func renderStatus(status *rapid.StatusResponse, prev *rapid.StatusResponse, flashes map[string]*statusFlash) {
 	fmt.Printf("zoekt-rapid — %d repos, up %s\n", status.RepoCount, status.Uptime)
 	fmt.Printf("next full reindex: %s\n\n", status.NextFullReindex)
 
@@ -339,7 +341,7 @@ func renderStatus(status *StatusResponse, prev *StatusResponse, flashes map[stri
 
 		// Branch + SHA with optional flash.
 		branchStr := r.Branch
-		shaStr := shortCLISHA(r.HeadSHA)
+		shaStr := shortSHA(r.HeadSHA)
 		if f, ok := flashes[path+":branch"]; ok {
 			branchStr = f.color + branchStr + ansiReset
 		}
@@ -419,7 +421,7 @@ func cmdRescan(args []string) {
 	fmt.Println(string(body))
 }
 
-func shortCLISHA(sha string) string {
+func shortSHA(sha string) string {
 	if len(sha) > 7 {
 		return sha[:7]
 	}

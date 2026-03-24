@@ -1,4 +1,4 @@
-package main
+package rapid
 
 // Trigram is a 3-byte sequence used for fast candidate filtering.
 type Trigram uint32

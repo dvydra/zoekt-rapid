@@ -1,4 +1,4 @@
-package main
+package rapid
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 type Poller struct {
 	config  Config
 	state   *StateTable
-	reindex *ReindexManager // nil if reindex not wired up (e.g. poll-only mode)
-	proxy   *SearchProxy    // nil if proxy not wired up (e.g. poll-only mode)
-	watcher *Watcher        // nil if fsnotify not available
+	Reindex *ReindexManager // nil if reindex not wired up (e.g. poll-only mode)
+	Proxy   *SearchProxy    // nil if proxy not wired up (e.g. poll-only mode)
+	Watcher *Watcher        // nil if fsnotify not available
 }
 
 func NewPoller(cfg Config, state *StateTable) *Poller {
@@ -68,8 +68,8 @@ func (p *Poller) discoverAndPoll() {
 	}
 
 	// Sync fsnotify watches.
-	if p.watcher != nil {
-		p.watcher.Sync()
+	if p.Watcher != nil {
+		p.Watcher.Sync()
 	}
 }
 
@@ -98,8 +98,8 @@ func (p *Poller) pollRepo(path string) {
 
 	if change.BranchChanged && change.OldBranch == "" {
 		// New repo — check if zoekt already has a valid shard.
-		if p.proxy != nil {
-			indexedSHA := p.proxy.IndexedSHA(path)
+		if p.Proxy != nil {
+			indexedSHA := p.Proxy.IndexedSHA(path)
 			if indexedSHA == bh.SHA {
 				// Zoekt shard matches current HEAD — no reindex needed.
 				p.state.SetIndexed(path, indexedSHA)
@@ -135,11 +135,11 @@ func (p *Poller) pollRepo(path string) {
 			path, change.DirtyCount)
 	}
 
-	if needsReindex && p.reindex != nil {
+	if needsReindex && p.Reindex != nil {
 		// Destroy delta — it's relative to the old HEAD.
 		p.state.SetDelta(path, nil)
 		p.state.SetStatus(path, RepoStale)
-		p.reindex.TriggerReindex(path)
+		p.Reindex.TriggerReindex(path)
 	} else {
 		// Rebuild delta index if dirty files changed.
 		if len(dirty) > 0 && change.DirtyChanged {
@@ -147,9 +147,9 @@ func (p *Poller) pollRepo(path string) {
 			p.state.SetDelta(path, delta)
 
 			// Check delta threshold — trigger early reindex if too large.
-			if p.reindex != nil && p.deltaExceedsThreshold(len(dirty), delta) {
+			if p.Reindex != nil && p.deltaExceedsThreshold(len(dirty), delta) {
 				log.Printf("[%s] delta exceeds threshold (%d files), triggering early reindex", path, len(dirty))
-				p.reindex.TriggerReindex(path)
+				p.Reindex.TriggerReindex(path)
 			}
 		} else if len(dirty) == 0 {
 			p.state.SetDelta(path, nil)

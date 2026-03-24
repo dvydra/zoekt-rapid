@@ -1,4 +1,4 @@
-package main
+package rapid
 
 import (
 	"context"
@@ -70,8 +70,8 @@ func goodbye() {
 	proxy := NewSearchProxy(cfg.ZoektURL, state)
 	reindexMgr := NewReindexManager(cfg, state, proxy)
 	poller := NewPoller(cfg, state)
-	poller.reindex = nil // don't trigger real zoekt-git-index in tests
-	poller.proxy = proxy
+	poller.Reindex = nil // don't trigger real zoekt-git-index in tests
+	poller.Proxy = proxy
 	scheduler := NewScheduler(cfg, reindexMgr)
 	srv := NewServer(proxy, state, reindexMgr, poller, scheduler, cfg.ProxyPort, cfg.ZoektURL)
 
@@ -203,7 +203,11 @@ func TestE2E_LiveProxy(t *testing.T) {
 
 	// Create a unique marker in this repo's working tree.
 	marker := fmt.Sprintf("live_e2e_test_marker_%d", time.Now().UnixNano())
-	markerFile := filepath.Join("/Users/dvydra/src/zoekt-rapid", "e2e_scratch_test.tmp")
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	markerFile := filepath.Join(wd, "e2e_scratch_test.tmp")
 
 	content := fmt.Sprintf("// %s\n", marker)
 	if err := os.WriteFile(markerFile, []byte(content), 0644); err != nil {
