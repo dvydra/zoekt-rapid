@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go version:*)",
+      "Bash(zoekt-git-index:*)",
+      "Bash(curl -s http://localhost:6070/api/search?q=test)",
+      "Bash(curl -s -X POST 'http://localhost:6070/api/search' -H 'Content-Type: application/json' -d '{\"\"\"\"q\"\"\"\":\"\"\"\"test\"\"\"\"}')",
+      "Bash(go list:*)",
+      "Bash(python3 -m json.tool)",
+      "Bash(go test:*)",
+      "Bash(go build:*)",
+      "Bash(./zoekt-rapid discover:*)",
+      "Bash(./zoekt-rapid version:*)",
+      "Bash(timeout 5 ./zoekt-rapid poll)",
+      "Bash(curl -s -X POST 'http://localhost:6070/api/search' -H 'Content-Type: application/json' -d '{\"\"\"\"q\"\"\"\":\"\"\"\"handleAuth\"\"\"\",\"\"\"\"num\"\"\"\":2}')",
+      "Bash(curl -s -X POST 'http://localhost:6070/api/search' -H 'Content-Type: application/json' -d '{\"\"\"\"q\"\"\"\":\"\"\"\"handleAuth repo:pandora\"\"\"\",\"\"\"\"num\"\"\"\":2}')",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(''''Files:'''', len\\(d[''''Result''''][''''Files''''] or []\\)\\)\")",
+      "Bash(curl -s -X POST 'http://localhost:6070/api/list' -d '{}')",
+      "Bash(python3 -c \":*)",
+      "Bash(~/src/entirehq/ephemera/incubator/zoekt/zoekt.sh serve:*)",
+      "Bash(kill -9 16299 16331)",
+      "Bash(lsof -i:6070 -i:6071 -i:3000)",
+      "Bash(pkill -9 -f zoekt-webserver)",
+      "Bash(pkill -9 -f neogrok)",
+      "Bash(pkill -9 -f 'zoekt-rapid serve')",
+      "Bash(ps:*)",
+      "Bash(launchctl unload:*)",
+      "Bash(1 launchctl:*)",
+      "Bash(1 sleep:*)",
+      "Bash(curl -s -X POST 'http://localhost:6071/api/search' -H 'Content-Type: application/json' -d '{\"\"\"\"q\"\"\"\":\"\"\"\"handleAuth\"\"\"\",\"\"\"\"num\"\"\"\":3}')",
+      "Bash(curl -s -X POST 'http://localhost:6071/api/list' -d '{}')",
+      "Bash(curl -s -X POST 'http://localhost:3000' -o /dev/null -w \"neogrok :3000 status: %{http_code}\\\\n\")",
+      "Bash(~/src/entirehq/ephemera/incubator/zoekt/skill/zoekt-search 'handleAuth' -s -n 5)",
+      "Bash(curl -s -X POST 'http://localhost:6070/api/search' -H 'Content-Type: application/json' -d '{\"\"\"\"q\"\"\"\":\"\"\"\"handleAuth\"\"\"\",\"\"\"\"num\"\"\"\":1}')",
+      "Bash(curl -s -X POST 'http://localhost:6070/api/search' -H 'Content-Type: application/json' -d '{\"\"\"\"q\"\"\"\":\"\"\"\"momma\"\"\"\",\"\"\"\"num\"\"\"\":1}')",
+      "Bash(go install:*)",
+      "Bash(launchctl load:*)"
+    ]
+  }
+}
