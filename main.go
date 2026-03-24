@@ -189,43 +189,141 @@ func cmdServe(args []string) {
 	fmt.Fprintln(os.Stderr, "done")
 }
 
+const (
+	ansiReset  = "\033[0m"
+	ansiDim    = "\033[90m"
+	ansiGreen  = "\033[32m"
+	ansiRed    = "\033[31m"
+	ansiYellow = "\033[33m"
+	ansiClear  = "\033[2J\033[H"
+)
+
 func cmdStatus(args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	portFlag := fs.Int("port", 6071, "proxy port to query")
+	liveFlag := fs.Bool("live", false, "live mode with change highlighting")
+	intervalFlag := fs.Float64("interval", 1.0, "refresh interval in seconds (live mode)")
 	fs.Parse(args)
 
-	url := fmt.Sprintf("http://localhost:%d/api/status", *portFlag)
-	resp, err := http.Get(url)
+	apiURL := fmt.Sprintf("http://localhost:%d/api/status", *portFlag)
+
+	if *liveFlag {
+		cmdStatusLive(apiURL, time.Duration(*intervalFlag*float64(time.Second)))
+		return
+	}
+
+	status, err := fetchStatus(apiURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot reach zoekt-rapid on port %d: %v\n", *portFlag, err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
+	}
+	renderStatus(status, nil, nil)
+}
+
+func cmdStatusLive(apiURL string, interval time.Duration) {
+	var prev *StatusResponse
+	// Track when each repo field last changed, for flash duration.
+	flashes := make(map[string]*statusFlash) // key: "path:field"
+	flashDur := 2 * time.Second
+
+	// Hide cursor.
+	fmt.Print("\033[?25l")
+	defer fmt.Print("\033[?25h")
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+
+	for {
+		status, err := fetchStatus(apiURL)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			time.Sleep(interval)
+			continue
+		}
+
+		// Compute new flashes by diffing against previous state.
+		if prev != nil {
+			now := time.Now()
+			for path, r := range status.Repos {
+				old, existed := prev.Repos[path]
+				if !existed {
+					flashes[path+":dirty"] = &statusFlash{ansiGreen, now.Add(flashDur)}
+					flashes[path+":branch"] = &statusFlash{ansiGreen, now.Add(flashDur)}
+					flashes[path+":sha"] = &statusFlash{ansiGreen, now.Add(flashDur)}
+					continue
+				}
+				if r.DirtyFiles != old.DirtyFiles {
+					if r.DirtyFiles > old.DirtyFiles {
+						flashes[path+":dirty"] = &statusFlash{ansiGreen, now.Add(flashDur)}
+					} else {
+						flashes[path+":dirty"] = &statusFlash{ansiRed, now.Add(flashDur)}
+					}
+				}
+				if r.Branch != old.Branch {
+					flashes[path+":branch"] = &statusFlash{ansiGreen, now.Add(flashDur)}
+				}
+				if r.HeadSHA != old.HeadSHA {
+					flashes[path+":sha"] = &statusFlash{ansiGreen, now.Add(flashDur)}
+				}
+			}
+		}
+
+		// Expire old flashes.
+		now := time.Now()
+		for k, f := range flashes {
+			if now.After(f.until) {
+				delete(flashes, k)
+			}
+		}
+
+		fmt.Print(ansiClear)
+		renderStatus(status, prev, flashes)
+		prev = status
+
+		select {
+		case <-sigCh:
+			fmt.Print(ansiClear)
+			return
+		case <-time.After(interval):
+		}
+	}
+}
+
+func fetchStatus(apiURL string) (*StatusResponse, error) {
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reach zoekt-rapid: %v", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	var status StatusResponse
 	if err := json.Unmarshal(body, &status); err != nil {
-		fmt.Fprintf(os.Stderr, "error parsing response: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("parse error: %v", err)
 	}
+	return &status, nil
+}
 
+type statusFlash struct {
+	color string
+	until time.Time
+}
+
+func renderStatus(status *StatusResponse, prev *StatusResponse, flashes map[string]*statusFlash) {
 	fmt.Printf("zoekt-rapid — %d repos, up %s\n", status.RepoCount, status.Uptime)
 	fmt.Printf("next full reindex: %s\n\n", status.NextFullReindex)
 
-	// Sort repos by path.
 	paths := make([]string, 0, len(status.Repos))
 	for p := range status.Repos {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
 
-	// Find common root prefix for relative display.
 	home, _ := os.UserHomeDir()
 	srcRoot := filepath.Join(home, "src") + "/"
 
 	for _, path := range paths {
 		r := status.Repos[path]
-		// Show relative path from ~/src, with parent dirs dimmed.
 		relPath := path
 		if cut, ok := strings.CutPrefix(path, srcRoot); ok {
 			relPath = cut
@@ -236,26 +334,43 @@ func cmdStatus(args []string) {
 		if dir == "." {
 			name = base
 		} else {
-			name = fmt.Sprintf("\033[90m%s/\033[0m%s", dir, base)
+			name = fmt.Sprintf("%s%s/%s%s", ansiDim, dir, ansiReset, base)
 		}
+
+		// Branch + SHA with optional flash.
+		branchStr := r.Branch
+		shaStr := shortCLISHA(r.HeadSHA)
+		if f, ok := flashes[path+":branch"]; ok {
+			branchStr = f.color + branchStr + ansiReset
+		}
+		if f, ok := flashes[path+":sha"]; ok {
+			shaStr = f.color + shaStr + ansiReset
+		}
+
+		// Dirty count with optional flash.
 		dirty := ""
 		if r.DirtyFiles > 0 {
-			dirty = fmt.Sprintf(" (%d dirty)", r.DirtyFiles)
+			dirtyStr := fmt.Sprintf("%d dirty", r.DirtyFiles)
+			if f, ok := flashes[path+":dirty"]; ok {
+				dirtyStr = f.color + dirtyStr + ansiReset
+			}
+			dirty = fmt.Sprintf(" (%s)", dirtyStr)
 		}
+
 		reindexing := ""
 		if r.Reindexing {
-			reindexing = " [reindexing]"
+			reindexing = fmt.Sprintf(" %s[reindexing]%s", ansiYellow, ansiReset)
 		}
 		stale := ""
 		if r.Status == "stale" || r.Status == "error" {
-			stale = fmt.Sprintf(" [%s]", r.Status)
+			stale = fmt.Sprintf(" %s[%s]%s", ansiRed, r.Status, ansiReset)
 		}
-		// Pad based on visible length (relPath), not the ANSI-colored name.
+
 		padding := 30 - len(relPath)
 		if padding < 1 {
 			padding = 1
 		}
-		fmt.Printf("  %s%*s%s@%s%s%s%s\n", name, padding, "", r.Branch, shortCLISHA(r.HeadSHA), dirty, stale, reindexing)
+		fmt.Printf("  %s%*s%s@%s%s%s%s\n", name, padding, "", branchStr, shaStr, dirty, stale, reindexing)
 	}
 }
 
