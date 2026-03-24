@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -141,6 +142,16 @@ func cmdServe(args []string) {
 
 	// Refresh repo map from zoekt on startup (needed for smart startup).
 	proxy.RefreshRepoMap()
+
+	// Start fsnotify watcher for instant file change detection.
+	watcher, err := NewWatcher(poller, state)
+	if err != nil {
+		log.Printf("fsnotify unavailable, falling back to polling only: %v", err)
+	} else {
+		poller.watcher = watcher
+		go watcher.Run()
+		defer watcher.Close()
+	}
 
 	// Start poller in background.
 	go poller.Run(ctx)

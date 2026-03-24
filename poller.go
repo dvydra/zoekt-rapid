@@ -12,6 +12,7 @@ type Poller struct {
 	state   *StateTable
 	reindex *ReindexManager // nil if reindex not wired up (e.g. poll-only mode)
 	proxy   *SearchProxy    // nil if proxy not wired up (e.g. poll-only mode)
+	watcher *Watcher        // nil if fsnotify not available
 }
 
 func NewPoller(cfg Config, state *StateTable) *Poller {
@@ -64,6 +65,11 @@ func (p *Poller) discoverAndPoll() {
 	// Poll all discovered repos.
 	for _, path := range repos {
 		p.pollRepo(path)
+	}
+
+	// Sync fsnotify watches.
+	if p.watcher != nil {
+		p.watcher.Sync()
 	}
 }
 

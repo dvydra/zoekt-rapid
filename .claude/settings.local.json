@@ -34,7 +34,9 @@
       "Bash(curl -s -X POST 'http://localhost:6070/api/search' -H 'Content-Type: application/json' -d '{\"\"\"\"q\"\"\"\":\"\"\"\"handleAuth\"\"\"\",\"\"\"\"num\"\"\"\":1}')",
       "Bash(curl -s -X POST 'http://localhost:6070/api/search' -H 'Content-Type: application/json' -d '{\"\"\"\"q\"\"\"\":\"\"\"\"momma\"\"\"\",\"\"\"\"num\"\"\"\":1}')",
       "Bash(go install:*)",
-      "Bash(launchctl load:*)"
+      "Bash(launchctl load:*)",
+      "Bash(go get:*)",
+      "Bash(bash /tmp/bench-rapid.sh)"
     ]
   }
 }
