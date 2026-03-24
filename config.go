@@ -41,6 +41,9 @@ type Config struct {
 	MaxDirtyFiles int
 	MaxDeltaBytes int64
 
+	// Directory names to skip when setting up fsnotify watches.
+	WatchSkipDirs []string
+
 	// What to do during reindex gap: "stale" or "blackout".
 	ReindexGapMode string
 }
@@ -60,6 +63,7 @@ func DefaultConfig() Config {
 		MaxConcurrentReindex: 2,
 		MaxDirtyFiles:        500,
 		MaxDeltaBytes:        50 * 1024 * 1024, // 50 MB
+		WatchSkipDirs:        []string{"node_modules", "vendor", ".terraform", ".next", "__pycache__", ".build", "dist", ".cache"},
 		ReindexGapMode:       "stale",
 	}
 }

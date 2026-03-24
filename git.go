@@ -81,7 +81,7 @@ func GetBranchAndHead(repoPath string) (BranchHead, error) {
 	}
 
 	return BranchHead{
-		Branch: strings.TrimSpace(string(branchOut)),
+		Branch: branch,
 		SHA:    strings.TrimSpace(string(shaOut)),
 	}, nil
 }

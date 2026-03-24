@@ -144,7 +144,7 @@ func cmdServe(args []string) {
 	proxy.RefreshRepoMap()
 
 	// Start fsnotify watcher for instant file change detection.
-	watcher, err := NewWatcher(poller, state)
+	watcher, err := NewWatcher(poller, state, cfg.WatchSkipDirs)
 	if err != nil {
 		log.Printf("fsnotify unavailable, falling back to polling only: %v", err)
 	} else {

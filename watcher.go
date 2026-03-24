@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,23 +15,29 @@ import (
 // triggering a poll for the affected repo without waiting for
 // the next 2s poll cycle.
 type Watcher struct {
-	poller  *Poller
-	state   *StateTable
-	watcher *fsnotify.Watcher
+	poller   *Poller
+	state    *StateTable
+	watcher  *fsnotify.Watcher
+	skipDirs map[string]bool // directory names to skip when watching
 
 	mu       sync.Mutex
 	repoDirs map[string]bool // watched repo paths
 }
 
-func NewWatcher(poller *Poller, state *StateTable) (*Watcher, error) {
+func NewWatcher(poller *Poller, state *StateTable, skipDirs []string) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
+	}
+	skip := make(map[string]bool, len(skipDirs))
+	for _, d := range skipDirs {
+		skip[d] = true
 	}
 	return &Watcher{
 		poller:   poller,
 		state:    state,
 		watcher:  fsw,
+		skipDirs: skip,
 		repoDirs: make(map[string]bool),
 	}, nil
 }
@@ -45,19 +52,17 @@ func (w *Watcher) Sync() {
 		current[path] = true
 	}
 
-	// Add new repos.
+	// Add new repos (recursively watch all subdirectories).
 	for path := range current {
 		if !w.repoDirs[path] {
-			if err := w.watcher.Add(path); err != nil {
-				log.Printf("[watcher] failed to watch %s: %v", path, err)
-			}
+			w.addRecursive(path)
 		}
 	}
 
 	// Remove stale repos.
 	for path := range w.repoDirs {
 		if !current[path] {
-			w.watcher.Remove(path)
+			w.removeRecursive(path)
 		}
 	}
 
@@ -70,12 +75,18 @@ func (w *Watcher) Run() {
 	pending := make(map[string]time.Time)
 	var mu sync.Mutex
 	debounce := 50 * time.Millisecond
+	done := make(chan struct{})
 
 	// Flush goroutine checks pending repos and polls them.
 	go func() {
 		ticker := time.NewTicker(25 * time.Millisecond)
 		defer ticker.Stop()
-		for range ticker.C {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
 			mu.Lock()
 			now := time.Now()
 			var ready []string
@@ -94,6 +105,8 @@ func (w *Watcher) Run() {
 			}
 		}
 	}()
+
+	defer close(done)
 
 	for {
 		select {
@@ -126,6 +139,35 @@ func (w *Watcher) Run() {
 // Close shuts down the watcher.
 func (w *Watcher) Close() error {
 	return w.watcher.Close()
+}
+
+// addRecursive walks a repo directory and adds watches for all subdirectories.
+func (w *Watcher) addRecursive(root string) {
+	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if name == ".git" || w.skipDirs[name] {
+			return filepath.SkipDir
+		}
+		if err := w.watcher.Add(path); err != nil {
+			log.Printf("[watcher] failed to watch %s: %v", path, err)
+		}
+		return nil
+	})
+}
+
+// removeRecursive removes all watches under a repo directory.
+func (w *Watcher) removeRecursive(root string) {
+	for _, watched := range w.watcher.WatchList() {
+		if strings.HasPrefix(watched, root+"/") || watched == root {
+			w.watcher.Remove(watched)
+		}
+	}
 }
 
 // repoForPath finds the managed repo that contains the given file path.

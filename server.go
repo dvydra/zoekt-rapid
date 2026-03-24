@@ -90,6 +90,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 // handlePassthrough forwards any request directly to zoekt-webserver.
 func (s *Server) handlePassthrough(w http.ResponseWriter, r *http.Request) {
 	url := strings.TrimSuffix(s.zoektURL, "/") + r.URL.Path
+	if r.URL.RawQuery != "" {
+		url += "?" + r.URL.RawQuery
+	}
 
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, url, r.Body)
 	if err != nil {
