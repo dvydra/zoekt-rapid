@@ -117,7 +117,7 @@ This means zoekt handles the heavy lifting (searching millions of lines across a
 To run as background services, create plist files in `~/Library/LaunchAgents/`:
 
 ```sh
-# com.zoekt.rapid.plist — zoekt-vanzelf on :6071
+# com.zoekt.vanzelf.plist — zoekt-vanzelf on :6071
 # com.zoekt.serve.plist — zoekt-webserver on :6070
 ```
 

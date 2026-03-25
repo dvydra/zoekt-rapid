@@ -74,7 +74,7 @@ On search:
 
 All managed via `~/Library/LaunchAgents/com.zoekt.*.plist`:
 - `com.zoekt.serve` — zoekt-webserver on :6070
-- `com.zoekt.rapid` — zoekt-vanzelf on :6071
+- `com.zoekt.vanzelf` — zoekt-vanzelf on :6071
 - `com.zoekt.neogrok` — neogrok on :3000 (points at :6071)
 - `com.zoekt.index` — periodic `zoekt.sh index` (every 15min)
 
