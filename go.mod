@@ -1,4 +1,4 @@
-module github.com/dvydra/zoekt-rapid
+module github.com/dvydra/zoekt-vanzelf
 
 go 1.26.1
 

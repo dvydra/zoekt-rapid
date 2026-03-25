@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Server is the HTTP server for zoekt-rapid.
+// Server is the HTTP server for zoekt-vanzelf.
 type Server struct {
 	proxy     *SearchProxy
 	state     *StateTable

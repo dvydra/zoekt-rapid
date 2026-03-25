@@ -1,4 +1,4 @@
-# zoekt-rapid
+# zoekt-vanzelf
 
 Search proxy that makes your uncommitted code searchable *instantly*. Sits in front of [zoekt-webserver](https://github.com/sourcegraph/zoekt) and adds working tree awareness — edits, new files, and deletions appear in search results within 2 seconds, no reindex required.
 
@@ -9,19 +9,19 @@ Zoekt builds trigram indexes from git commits. That's great for searching across
 ## How it works
 
 ```
-client → zoekt-rapid :6071 → zoekt-webserver :6070 → ~/.zoekt/*.zoekt
+client → zoekt-vanzelf :6071 → zoekt-webserver :6070 → ~/.zoekt/*.zoekt
                │
                ├── delta index   (in-memory trigram index of dirty files)
                ├── repo poller   (git status every 2s + fsnotify)
                └── reindex mgr   (zoekt-git-index on branch/HEAD change)
 ```
 
-zoekt-rapid merges results from two sources:
+zoekt-vanzelf merges results from two sources:
 
 1. **Base index** — zoekt's on-disk trigram shards (the full corpus, built by `zoekt-git-index`)
 2. **Delta index** — lightweight in-memory trigram index of files modified since the last commit
 
-On every search request, zoekt-rapid forwards the query to zoekt, then **suppresses stale results** for dirty files and **injects fresh matches** from the delta index. The merge is transparent — clients see a single unified result set.
+On every search request, zoekt-vanzelf forwards the query to zoekt, then **suppresses stale results** for dirty files and **injects fresh matches** from the delta index. The merge is transparent — clients see a single unified result set.
 
 ### What triggers updates
 
@@ -35,14 +35,14 @@ On every search request, zoekt-rapid forwards the query to zoekt, then **suppres
 ## Install
 
 ```sh
-go install github.com/dvydra/zoekt-rapid/cmd/zoekt-rapid@latest
+go install github.com/dvydra/zoekt-vanzelf/cmd/zoekt-vanzelf@latest
 ```
 
 Or build from source:
 
 ```sh
-git clone https://github.com/dvydra/zoekt-rapid
-cd zoekt-rapid
+git clone https://github.com/dvydra/zoekt-vanzelf
+cd zoekt-vanzelf
 make install
 ```
 
@@ -55,28 +55,28 @@ make install
 
 ```sh
 # Start the proxy (discovers repos under ~/src, polls, serves on :6071)
-zoekt-rapid serve
+zoekt-vanzelf serve
 
 # Check what it's tracking
-zoekt-rapid status
+zoekt-vanzelf status
 
 # Live dashboard with change highlighting
-zoekt-rapid status --live
+zoekt-vanzelf status --live
 
 # Trigger a reindex for a specific repo
-zoekt-rapid reindex myproject
+zoekt-vanzelf reindex myproject
 
 # Trigger reindex for all repos
-zoekt-rapid reindex
+zoekt-vanzelf reindex
 
 # Re-scan for new/removed repos
-zoekt-rapid rescan
+zoekt-vanzelf rescan
 ```
 
 ### Flags
 
 ```sh
-zoekt-rapid serve \
+zoekt-vanzelf serve \
   --roots ~/src,~/work \     # directories to scan for git repos
   --port 6071 \              # proxy listen port
   --zoekt http://localhost:6070  # upstream zoekt URL
@@ -110,21 +110,21 @@ On search:
 3. Run the query against the delta index
 4. Merge delta matches into the response
 
-This means zoekt handles the heavy lifting (searching millions of lines across all repos) while zoekt-rapid patches in just the handful of files you've touched since your last commit.
+This means zoekt handles the heavy lifting (searching millions of lines across all repos) while zoekt-vanzelf patches in just the handful of files you've touched since your last commit.
 
 ## macOS launchd setup
 
 To run as background services, create plist files in `~/Library/LaunchAgents/`:
 
 ```sh
-# com.zoekt.rapid.plist — zoekt-rapid on :6071
+# com.zoekt.rapid.plist — zoekt-vanzelf on :6071
 # com.zoekt.serve.plist — zoekt-webserver on :6070
 ```
 
 ## Project layout
 
 ```
-cmd/zoekt-rapid/        CLI entry point
+cmd/zoekt-vanzelf/        CLI entry point
 internal/rapid/         Library code
   config.go             Configuration and defaults
   discovery.go          Git repo discovery under configured roots

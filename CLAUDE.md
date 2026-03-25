@@ -1,18 +1,18 @@
-# zoekt-rapid
+# zoekt-vanzelf
 
 Search proxy that sits in front of [zoekt-webserver](https://github.com/sourcegraph/zoekt) and adds working tree awareness. Edits, new files, and deletions are searchable within 2 seconds — no reindex needed.
 
 ## Architecture
 
 ```
-neogrok :3000 → zoekt-rapid :6071 → zoekt-webserver :6070 → ~/.zoekt/*.zoekt
+neogrok :3000 → zoekt-vanzelf :6071 → zoekt-webserver :6070 → ~/.zoekt/*.zoekt
                      │
                      ├── delta index (in-memory trigram index of dirty files)
                      ├── repo poller (git status every 2s)
                      └── reindex manager (runs zoekt-git-index on branch/HEAD change)
 ```
 
-zoekt-rapid merges results from two sources:
+zoekt-vanzelf merges results from two sources:
 1. **Base index** — zoekt's on-disk trigram shards (built by `zoekt-git-index`)
 2. **Delta index** — in-memory trigram index of files modified since the base index
 
@@ -21,27 +21,27 @@ For dirty files, zoekt results are suppressed and replaced with delta results.
 ## Development
 
 ```sh
-make build                     # build binary to ./zoekt-rapid
+make build                     # build binary to ./zoekt-vanzelf
 make test                      # run tests
 make install                   # install to GOBIN (needed for launchd)
-go build ./cmd/zoekt-rapid     # or use go directly
+go build ./cmd/zoekt-vanzelf     # or use go directly
 ```
 
 ## Commands
 
 ```sh
-zoekt-rapid serve              # start proxy (discovery + polling + HTTP)
-zoekt-rapid status             # show all repo states
-zoekt-rapid reindex [repo]     # trigger reindex (all or specific)
-zoekt-rapid rescan             # re-discover repos
-zoekt-rapid discover           # one-shot repo discovery (debug)
-zoekt-rapid poll               # run polling loop (debug)
+zoekt-vanzelf serve              # start proxy (discovery + polling + HTTP)
+zoekt-vanzelf status             # show all repo states
+zoekt-vanzelf reindex [repo]     # trigger reindex (all or specific)
+zoekt-vanzelf rescan             # re-discover repos
+zoekt-vanzelf discover           # one-shot repo discovery (debug)
+zoekt-vanzelf poll               # run polling loop (debug)
 ```
 
 ## Project layout
 
 ```
-cmd/zoekt-rapid/main.go        — CLI entry point and subcommand dispatch
+cmd/zoekt-vanzelf/main.go        — CLI entry point and subcommand dispatch
 internal/rapid/                 — library code (package rapid):
   config.go                     — configuration with defaults
   discovery.go                  — find git repos under configured roots
@@ -74,7 +74,7 @@ On search:
 
 All managed via `~/Library/LaunchAgents/com.zoekt.*.plist`:
 - `com.zoekt.serve` — zoekt-webserver on :6070
-- `com.zoekt.rapid` — zoekt-rapid on :6071
+- `com.zoekt.rapid` — zoekt-vanzelf on :6071
 - `com.zoekt.neogrok` — neogrok on :3000 (points at :6071)
 - `com.zoekt.index` — periodic `zoekt.sh index` (every 15min)
 

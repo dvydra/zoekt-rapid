@@ -16,7 +16,7 @@ type Config struct {
 	// Glob patterns matched against repo paths to exclude.
 	ExcludePatterns []string
 
-	// Port for the zoekt-rapid proxy.
+	// Port for the zoekt-vanzelf proxy.
 	ProxyPort int
 
 	// Upstream zoekt-webserver URL.

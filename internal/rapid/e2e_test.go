@@ -16,7 +16,7 @@ import (
 )
 
 // TestE2E_DeltaSearchLifecycle tests the full flow:
-//   - Start zoekt-rapid with a test repo
+//   - Start zoekt-vanzelf with a test repo
 //   - Edit a file → search finds the edit via delta
 //   - Add a new file → searchable via delta
 //   - Delete a file → no longer searchable (tombstone)
@@ -50,10 +50,10 @@ func goodbye() {
 	// This isolates the test from needing real zoekt.
 	mockZoektURL := startMockZoekt(t)
 
-	// Pick a free port for zoekt-rapid.
+	// Pick a free port for zoekt-vanzelf.
 	rapidPort := freePort(t)
 
-	// Configure and start zoekt-rapid.
+	// Configure and start zoekt-vanzelf.
 	cfg := DefaultConfig()
 	cfg.Roots = []string{root}
 	cfg.ScanDepth = 3
@@ -187,8 +187,8 @@ func brandNew() {
 	})
 }
 
-// TestE2E_LiveProxy tests against the actual running zoekt-rapid instance.
-// Only runs if zoekt-rapid is running on port 6071.
+// TestE2E_LiveProxy tests against the actual running zoekt-vanzelf instance.
+// Only runs if zoekt-vanzelf is running on port 6071.
 func TestE2E_LiveProxy(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live E2E test in short mode")
@@ -197,7 +197,7 @@ func TestE2E_LiveProxy(t *testing.T) {
 	rapidURL := "http://localhost:6071"
 	resp, err := http.Get(rapidURL + "/api/status")
 	if err != nil {
-		t.Skip("zoekt-rapid not running on port 6071, skipping live test")
+		t.Skip("zoekt-vanzelf not running on port 6071, skipping live test")
 	}
 	resp.Body.Close()
 

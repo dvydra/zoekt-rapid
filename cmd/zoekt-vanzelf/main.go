@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dvydra/zoekt-rapid/internal/rapid"
+	"github.com/dvydra/zoekt-vanzelf/internal/rapid"
 )
 
 const version = "0.1.0"
@@ -41,7 +41,7 @@ func main() {
 	case "rescan":
 		cmdRescan(os.Args[2:])
 	case "version":
-		fmt.Println("zoekt-rapid", version)
+		fmt.Println("zoekt-vanzelf", version)
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -52,7 +52,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `zoekt-rapid - fast code search with working tree awareness
+	fmt.Fprintln(os.Stderr, `zoekt-vanzelf - fast code search with working tree awareness
 
 Commands:
   discover    Scan for git repos under configured roots
@@ -175,7 +175,7 @@ func cmdServe(args []string) {
 		}
 	}()
 
-	fmt.Fprintf(os.Stderr, "zoekt-rapid proxy on :%d → %s\n", cfg.ProxyPort, cfg.ZoektURL)
+	fmt.Fprintf(os.Stderr, "zoekt-vanzelf proxy on :%d → %s\n", cfg.ProxyPort, cfg.ZoektURL)
 
 	// Run server (blocks until error or signal).
 	go func() {
@@ -294,7 +294,7 @@ func cmdStatusLive(apiURL string, interval time.Duration) {
 func fetchStatus(apiURL string) (*rapid.StatusResponse, error) {
 	resp, err := http.Get(apiURL)
 	if err != nil {
-		return nil, fmt.Errorf("cannot reach zoekt-rapid: %v", err)
+		return nil, fmt.Errorf("cannot reach zoekt-vanzelf: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -312,7 +312,7 @@ type statusFlash struct {
 }
 
 func renderStatus(status *rapid.StatusResponse, prev *rapid.StatusResponse, flashes map[string]*statusFlash) {
-	fmt.Printf("zoekt-rapid — %d repos, up %s\n", status.RepoCount, status.Uptime)
+	fmt.Printf("zoekt-vanzelf — %d repos, up %s\n", status.RepoCount, status.Uptime)
 	fmt.Printf("next full reindex: %s\n\n", status.NextFullReindex)
 
 	paths := make([]string, 0, len(status.Repos))
