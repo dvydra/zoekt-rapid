@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+"""Zoekt code search wrapper that outputs clean, readable results.
+
+Usage:
+  zoekt-search <query> [--files-only] [--spans] [--context N] [--limit N] [--repo REPO]
+
+Queries the local zoekt-vanzelf proxy (or zoekt-webserver directly) and returns
+decoded, readable results.
+
+Zoekt query syntax:
+  word                  literal search
+  "exact phrase"        exact match
+  file:path             filter by file path (regex)
+  repo:name             filter by repo name (substring)
+  lang:python           filter by language
+  -word                 exclude term
+  word1 word2           AND (both must match)
+  (word1 OR word2)      OR
+  sym:name              symbol search
+  case:yes              case-sensitive
+  content:pattern       search file content (regex)
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import sys
+import urllib.request
+import urllib.error
+
+# Default to zoekt-vanzelf proxy; fall back to zoekt-webserver directly.
+ZOEKT_API = os.environ.get("ZOEKT_URL", "http://localhost:6071")
+
+# How many lines apart matches can be and still merge into one span
+SPAN_GAP = 5
+
+
+def _check_server() -> None:
+    """Check if the zoekt server is reachable."""
+    try:
+        req = urllib.request.Request(f"{ZOEKT_API}/api/list", data=b"{}", method="POST")
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        print(f"Error: zoekt server not reachable at {ZOEKT_API}", file=sys.stderr)
+        print("Start it with: zoekt-vanzelf serve", file=sys.stderr)
+        print("Or set ZOEKT_URL to point to your server.", file=sys.stderr)
+        sys.exit(1)
+
+
+def api_search(query: str, num_results: int = 100) -> dict:
+    """Search via the zoekt webserver API."""
+    _check_server()
+
+    payload = json.dumps({
+        "q": query,
+        "opts": {
+            "NumContextLines": 0,
+            "MaxMatchDisplayCount": num_results,
+        },
+    }).encode()
+
+    req = urllib.request.Request(
+        f"{ZOEKT_API}/api/search",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except urllib.error.URLError as e:
+        print(f"Error: cannot reach zoekt server at {ZOEKT_API}", file=sys.stderr)
+        print(f"  ({e})", file=sys.stderr)
+        sys.exit(1)
+
+
+def api_list() -> dict[str, str]:
+    """Get repo name -> source path mapping from the API."""
+    payload = json.dumps({}).encode()
+    req = urllib.request.Request(
+        f"{ZOEKT_API}/api/list",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        mapping = {}
+        for repo in data.get("List", {}).get("Repos", []):
+            r = repo.get("Repository", {})
+            name = r.get("Name", "")
+            source = r.get("Source", "")
+            if name and source:
+                mapping[name] = source
+        return mapping
+    except Exception:
+        return {}
+
+
+_source_cache: dict[str, str] | None = None
+
+
+def resolve_source_path(repo_name: str, filename: str) -> str:
+    """Resolve a repo + filename to a local filesystem path."""
+    global _source_cache
+    if _source_cache is None:
+        _source_cache = api_list()
+
+    source_dir = _source_cache.get(repo_name, "")
+    if source_dir:
+        return f"{source_dir}/{filename}"
+    return filename
+
+
+def _collapse_line_matches(matches: list[dict], gap: int = SPAN_GAP) -> list[dict]:
+    """Collapse adjacent line matches into spans.
+
+    Returns a list of dicts with keys: start, end, lines (list of (num, text)).
+    Matches within `gap` lines of each other are merged into a single span.
+    """
+    if not matches:
+        return []
+
+    # Sort by line number
+    sorted_matches = sorted(matches, key=lambda m: m.get("LineNumber", 0))
+
+    spans = []
+    current_start = None
+    current_end = None
+    current_lines = []
+
+    for match in sorted_matches:
+        line_num = match.get("LineNumber", 0)
+        line_b64 = match.get("Line", "")
+        try:
+            line_text = base64.b64decode(line_b64).decode("utf-8", errors="replace").rstrip()
+        except Exception:
+            line_text = "(decode error)"
+
+        if current_start is None:
+            current_start = line_num
+            current_end = line_num
+            current_lines = [(line_num, line_text)]
+        elif line_num <= current_end + gap:
+            current_end = line_num
+            current_lines.append((line_num, line_text))
+        else:
+            spans.append({"start": current_start, "end": current_end, "lines": current_lines})
+            current_start = line_num
+            current_end = line_num
+            current_lines = [(line_num, line_text)]
+
+    if current_start is not None:
+        spans.append({"start": current_start, "end": current_end, "lines": current_lines})
+
+    return spans
+
+
+def search(query: str, files_only: bool = False, spans_mode: bool = False,
+           context: int = 0, limit: int = 30, repo: str | None = None) -> None:
+    """Run zoekt search and print decoded results."""
+    full_query = query
+    if repo:
+        full_query = f"repo:{repo} {query}"
+
+    data = api_search(full_query, num_results=limit * 20)
+    result = data.get("Result", {})
+    files = result.get("Files") or []
+
+    if spans_mode:
+        _print_spans(files, limit)
+    elif files_only:
+        _print_files_only(files, limit)
+    else:
+        _print_verbose(files, limit)
+
+    file_count = min(len(files), limit)
+    if file_count == 0:
+        if not spans_mode:
+            print("No results found.")
+    else:
+        total = result.get("MatchCount", file_count)
+        if not spans_mode:
+            print(f"{'=' * 80}")
+            print(f"Found matches in {file_count} files ({total} total matches)" +
+                  (f" — showing first {limit}" if len(files) > limit else ""))
+
+
+def _print_spans(files: list[dict], limit: int) -> None:
+    """Print compact span output: file:start-end with first matched line as preview."""
+    span_count = 0
+    for entry in files:
+        if span_count >= limit:
+            break
+
+        repo_name = entry.get("Repository", "")
+        filename = entry.get("FileName", "")
+        source = resolve_source_path(repo_name, filename)
+        matches = entry.get("LineMatches", [])
+
+        if not matches:
+            print(f"  {source}")
+            span_count += 1
+            continue
+
+        spans = _collapse_line_matches(matches)
+        for span in spans:
+            if span_count >= limit:
+                break
+            start = span["start"]
+            end = span["end"]
+            # Use first matched line as preview
+            preview = span["lines"][0][1].strip() if span["lines"] else ""
+            if len(preview) > 80:
+                preview = preview[:77] + "..."
+
+            if start == end:
+                print(f"  {source}:{start}  — {preview}")
+            else:
+                print(f"  {source}:{start}-{end}  — {preview}")
+            span_count += 1
+
+    if span_count == 0:
+        print("No results found.")
+    else:
+        print(f"\n{span_count} spans across {min(len(files), limit)} files")
+
+
+def _print_files_only(files: list[dict], limit: int) -> None:
+    """Print matching filenames only."""
+    for i, entry in enumerate(files):
+        if i >= limit:
+            break
+        repo_name = entry.get("Repository", "")
+        filename = entry.get("FileName", "")
+        source = resolve_source_path(repo_name, filename)
+        print(f"  {source}")
+
+
+def _print_verbose(files: list[dict], limit: int) -> None:
+    """Print full verbose output with all matched lines."""
+    for i, entry in enumerate(files):
+        if i >= limit:
+            break
+
+        repo_name = entry.get("Repository", "")
+        filename = entry.get("FileName", "")
+        language = entry.get("Language", "")
+        source = resolve_source_path(repo_name, filename)
+
+        print(f"{'=' * 80}")
+        print(f"File: {filename}")
+        print(f"Path: {source}")
+        if language:
+            print(f"Lang: {language}")
+        print(f"Repo: {repo_name}")
+
+        matches = entry.get("LineMatches", [])
+        if not matches:
+            continue
+
+        print(f"{'─' * 80}")
+        for match in matches:
+            line_num = match.get("LineNumber", 0)
+            line_b64 = match.get("Line", "")
+            try:
+                line_text = base64.b64decode(line_b64).decode("utf-8", errors="replace").rstrip()
+            except Exception:
+                line_text = "(decode error)"
+
+            print(f"  {line_num:6d}: {line_text}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Search code with zoekt",
+        epilog=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("query", nargs="+", help="Search query (zoekt syntax)")
+    parser.add_argument("-f", "--files-only", action="store_true",
+                        help="Show matching filenames only")
+    parser.add_argument("-s", "--spans", action="store_true",
+                        help="Compact output: collapse matches into line-range spans")
+    parser.add_argument("-c", "--context", type=int, default=0,
+                        help="Lines of context around matches")
+    parser.add_argument("-n", "--limit", type=int, default=30,
+                        help="Max number of files/spans to show (default: 30)")
+    parser.add_argument("-r", "--repo", type=str, default=None,
+                        help="Filter by repository name")
+
+    args = parser.parse_args()
+    query = " ".join(args.query)
+    search(query, files_only=args.files_only, spans_mode=args.spans,
+           context=args.context, limit=args.limit, repo=args.repo)
+
+
+if __name__ == "__main__":
+    main()

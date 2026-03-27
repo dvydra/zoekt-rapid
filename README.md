@@ -9,11 +9,11 @@ Zoekt builds trigram indexes from git commits. That's great for searching across
 ## How it works
 
 ```
-client → zoekt-vanzelf :6071 → zoekt-webserver :6070 → ~/.zoekt/*.zoekt
-               │
-               ├── delta index   (in-memory trigram index of dirty files)
-               ├── repo poller   (git status every 2s + fsnotify)
-               └── reindex mgr   (zoekt-git-index on branch/HEAD change)
+neogrok :3000 → zoekt-vanzelf :6071 → zoekt-webserver :6070 → ~/.zoekt/*.zoekt
+                     │
+                     ├── delta index   (in-memory trigram index of dirty files)
+                     ├── repo poller   (git status every 2s + fsnotify)
+                     └── reindex mgr   (zoekt-git-index on branch/HEAD change)
 ```
 
 zoekt-vanzelf merges results from two sources:
@@ -34,7 +34,7 @@ On every search request, zoekt-vanzelf forwards the query to zoekt, then **suppr
 
 ## Install
 
-The installer sets up the full stack: zoekt, zoekt-vanzelf, initial index, and macOS launchd agents.
+One command sets up the full code search stack:
 
 ```sh
 git clone https://github.com/dvydra/zoekt-vanzelf
@@ -42,11 +42,15 @@ cd zoekt-vanzelf
 ./install.sh
 ```
 
-This will:
-1. Install `zoekt-webserver` and `zoekt-git-index` from [sourcegraph/zoekt](https://github.com/sourcegraph/zoekt)
-2. Build and install `zoekt-vanzelf`
-3. Index all git repos under `~/src` (first run only)
-4. Create and start launchd agents so everything runs on login and auto-restarts
+The installer handles everything:
+
+1. **zoekt** — installs `zoekt-webserver` and `zoekt-git-index` from [sourcegraph/zoekt](https://github.com/sourcegraph/zoekt)
+2. **zoekt-vanzelf** — builds the proxy from source
+3. **neogrok** — installs the [web UI](https://github.com/nicholasgasior/neogrok) (requires npm; skipped if unavailable)
+4. **zoekt-search** — installs a CLI search tool to `~/.local/bin`
+5. **Initial index** — indexes all git repos under `~/src` (first run only)
+6. **launchd agents** — creates and starts background services that run on login
+7. **Claude Code integration** — installs `/zoekt` slash command and auto-skill (if `~/.claude` exists)
 
 After install, verify with:
 ```sh
@@ -57,11 +61,19 @@ zoekt-vanzelf status
 
 - **Go 1.26+** — install from [go.dev](https://go.dev/dl/) or `brew install go`
 - **macOS** — the installer uses launchd for service management
-- **git repos under `~/src`** — this is the default root; configurable via `--roots`
+- **Node.js** (optional) — for the neogrok web UI
+
+### Uninstall
+
+```sh
+./install.sh uninstall
+```
+
+Removes launchd agents, the `zoekt-search` symlink, and Claude Code skill files. Leaves binaries in GOBIN and index shards in `~/.zoekt` for manual cleanup.
 
 ### Manual install
 
-If you prefer to install the pieces yourself:
+If you prefer to set things up yourself:
 
 ```sh
 # Install zoekt (the base search engine)
@@ -74,45 +86,45 @@ zoekt-webserver -index ~/.zoekt -listen :6070 -rpc
 # Index your repos (repeat for each repo, or let zoekt-vanzelf handle it)
 zoekt-git-index -index ~/.zoekt ~/src/myproject
 
-# Install zoekt-vanzelf
+# Install and start zoekt-vanzelf
 go install github.com/dvydra/zoekt-vanzelf/cmd/zoekt-vanzelf@latest
-
-# Start the proxy
 zoekt-vanzelf serve
-```
-
-### Optional: web UI
-
-[neogrok](https://github.com/nicholasgasior/neogrok) provides a browser-based search interface. Point it at zoekt-vanzelf to get live working tree search in the browser:
-
-```sh
-npm install -g neogrok
-ZOEKT_URL=http://localhost:6071 PORT=3000 neogrok
 ```
 
 ## Usage
 
+### zoekt-search CLI
+
+The fastest way to search from the terminal:
+
 ```sh
-# Start the proxy (discovers repos under ~/src, polls, serves on :6071)
-zoekt-vanzelf serve
+zoekt-search 'HandleRequest'              # full output with line matches
+zoekt-search 'HandleRequest' -s           # compact spans (file:line-range)
+zoekt-search 'HandleRequest' -f           # filenames only
+zoekt-search 'sym:Config' -s -n 10        # symbol search, limit 10 results
+zoekt-search 'pattern lang:go'            # filter by language
+zoekt-search 'pattern repo:myproject'     # filter by repo
+zoekt-search 'pattern' -r myproject       # same, via flag
+```
 
-# Check what it's tracking
-zoekt-vanzelf status
+Set `ZOEKT_URL` to override the default endpoint (`http://localhost:6071`).
 
-# Live dashboard with change highlighting
-zoekt-vanzelf status --live
+### Claude Code
 
-# Trigger a reindex for a specific repo
-zoekt-vanzelf reindex myproject
+If Claude Code is installed, the installer adds:
+- `/zoekt <query>` — slash command that spawns a search subagent
+- Auto-triggered skill — Claude automatically prefers zoekt for code search tasks
 
-# Trigger reindex for all repos
-zoekt-vanzelf reindex
+### zoekt-vanzelf commands
 
-# Re-scan for new/removed repos
-zoekt-vanzelf rescan
-
-# Print version
-zoekt-vanzelf version
+```sh
+zoekt-vanzelf serve                # start the proxy
+zoekt-vanzelf status               # show tracked repos
+zoekt-vanzelf status --live        # live dashboard with change highlighting
+zoekt-vanzelf reindex myproject    # trigger reindex for a specific repo
+zoekt-vanzelf reindex              # trigger reindex for all repos
+zoekt-vanzelf rescan               # re-discover repos
+zoekt-vanzelf version              # print version
 ```
 
 ### Flags
@@ -156,14 +168,15 @@ This means zoekt handles the heavy lifting (searching millions of lines across a
 
 ## macOS launchd agents
 
-The installer creates two launchd agents in `~/Library/LaunchAgents/`:
+The installer creates launchd agents in `~/Library/LaunchAgents/`:
 
-| Agent | Label | Service | Log |
-|-------|-------|---------|-----|
-| `com.zoekt.serve.plist` | zoekt-webserver on `:6070` | Base trigram index | `/tmp/zoekt-serve.log` |
-| `com.zoekt.vanzelf.plist` | zoekt-vanzelf on `:6071` | Proxy with live deltas | `/tmp/zoekt-vanzelf.log` |
+| Agent | Service | Port | Log |
+|-------|---------|------|-----|
+| `com.zoekt.serve` | zoekt-webserver | 6070 | `/tmp/zoekt-serve.log` |
+| `com.zoekt.vanzelf` | zoekt-vanzelf proxy | 6071 | `/tmp/zoekt-vanzelf.log` |
+| `com.zoekt.neogrok` | neogrok web UI | 3000 | `/tmp/zoekt-neogrok.log` |
 
-Both are set to `RunAtLoad` + `KeepAlive` — they start on login and restart if they crash.
+All are set to `RunAtLoad` + `KeepAlive` — they start on login and restart if they crash.
 
 ```sh
 # Restart zoekt-vanzelf
@@ -174,25 +187,36 @@ launchctl kill SIGTERM gui/$(id -u)/com.zoekt.vanzelf
 
 # View logs
 tail -f /tmp/zoekt-vanzelf.log
+
+# Re-run installer to upgrade
+./install.sh
+
+# Remove everything
+./install.sh uninstall
 ```
 
 ## Project layout
 
 ```
 cmd/zoekt-vanzelf/        CLI entry point
-internal/rapid/         Library code
-  config.go             Configuration and defaults
-  discovery.go          Git repo discovery under configured roots
-  git.go                Git subprocess helpers
-  state.go              Thread-safe repo state table
-  poller.go             Polling loop (2s repo poll, 60s discovery)
-  watcher.go            fsnotify for instant file change detection
-  trigram.go            Trigram extraction and posting lists
-  delta.go              Delta index build and regex search
-  proxy.go              Zoekt API proxy with delta merge
-  server.go             HTTP server and API endpoints
-  reindex.go            Reindex manager with concurrency limiting
-  scheduler.go          Periodic full reindex scheduler
+internal/rapid/           Library code
+  config.go               Configuration and defaults
+  discovery.go            Git repo discovery under configured roots
+  git.go                  Git subprocess helpers
+  state.go                Thread-safe repo state table
+  poller.go               Polling loop (2s repo poll, 60s discovery)
+  watcher.go              fsnotify for instant file change detection
+  trigram.go              Trigram extraction and posting lists
+  delta.go                Delta index build and regex search
+  proxy.go                Zoekt API proxy with delta merge
+  server.go               HTTP server and API endpoints
+  reindex.go              Reindex manager with concurrency limiting
+  scheduler.go            Periodic full reindex scheduler
+skill/                    CLI and editor integrations
+  zoekt-search            Python CLI for searching from terminal
+  SKILL.md                Claude Code auto-triggered skill
+  zoekt.md                Claude Code /zoekt slash command
+install.sh                One-command installer
 ```
 
 ## License
