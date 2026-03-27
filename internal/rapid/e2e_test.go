@@ -230,6 +230,172 @@ func TestE2E_LiveProxy(t *testing.T) {
 	})
 }
 
+// TestE2E_ProxyMerge_EditFile proves the full proxy merge flow:
+//   - Mock zoekt returns stale results for the OLD file content ("foo\nfoo")
+//   - The working tree has the NEW content ("bar\nfoo")
+//   - Searching "foo": zoekt's line 1 hit is suppressed, delta returns only line 2
+//   - Searching "bar": zoekt has nothing, delta returns line 1
+func TestE2E_ProxyMerge_EditFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E test in short mode")
+	}
+
+	// Create a git repo with initial content "foo\nfoo".
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "test-repo")
+	initGitRepo(t, repoDir)
+	writeTestFile(t, repoDir, "test.txt", "foo\nfoo\n")
+	gitAdd(t, repoDir, ".")
+	gitCommit(t, repoDir, "initial")
+
+	// Now edit the file in the working tree: "bar\nfoo".
+	writeTestFile(t, repoDir, "test.txt", "bar\nfoo\n")
+
+	// Start a mock zoekt that returns what zoekt WOULD return for the old content:
+	// two matches for "foo" in test.txt (line 1 and line 2).
+	mockURL := startMockZoektWithStaleResults(t, "test-repo", repoDir)
+
+	rapidPort := freePort(t)
+
+	cfg := DefaultConfig()
+	cfg.Roots = []string{root}
+	cfg.ScanDepth = 3
+	cfg.ProxyPort = rapidPort
+	cfg.ZoektURL = mockURL
+	cfg.RepoPollInterval = 200 * time.Millisecond
+	cfg.DiscoveryInterval = 60 * time.Second
+	cfg.ReindexInterval = 60 * time.Minute
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	state := NewStateTable()
+	proxy := NewSearchProxy(cfg.ZoektURL, state)
+	reindexMgr := NewReindexManager(cfg, state, proxy)
+	poller := NewPoller(cfg, state)
+	poller.Reindex = nil
+	poller.Proxy = proxy
+	scheduler := NewScheduler(cfg, reindexMgr)
+	srv := NewServer(proxy, state, reindexMgr, poller, scheduler, cfg.ProxyPort, cfg.ZoektURL)
+
+	proxy.RefreshRepoMap()
+	go poller.Run(ctx)
+	go func() { srv.ListenAndServe() }()
+
+	rapidURL := fmt.Sprintf("http://localhost:%d", rapidPort)
+	waitForServer(t, rapidURL, 5*time.Second)
+
+	// Wait for delta to be built.
+	waitForCondition(t, 5*time.Second, func() bool {
+		s := state.Get(repoDir)
+		return s != nil && s.DeltaIndex != nil && len(s.DeltaIndex.Files) > 0
+	}, "delta index should be built for edited file")
+
+	t.Run("search_foo_returns_only_line_2_from_delta", func(t *testing.T) {
+		// Mock zoekt returns 2 hits for "foo" (lines 1 and 2, from old content).
+		// But test.txt is dirty, so ALL zoekt results for it are suppressed.
+		// Delta has "bar\nfoo\n", so only line 2 matches "foo".
+		// clean.txt also passes through from zoekt (1 match).
+		// So total = 1 (delta, line 2 of test.txt) + 1 (zoekt, clean.txt) = 2 matches.
+		waitForCondition(t, 5*time.Second, func() bool {
+			matches := search(t, rapidURL, "foo")
+			var testTxtMatches []searchMatch
+			for _, m := range matches {
+				if m.File == "test.txt" {
+					testTxtMatches = append(testTxtMatches, m)
+				}
+			}
+			if len(testTxtMatches) != 1 {
+				t.Logf("DEBUG: test.txt matches=%d total=%d: %+v", len(testTxtMatches), len(matches), matches)
+				return false
+			}
+			return testTxtMatches[0].Line == 2 && testTxtMatches[0].Content == "foo"
+		}, "should find exactly 1 'foo' match in test.txt on line 2 (delta), not 2 (stale zoekt)")
+	})
+
+	t.Run("search_bar_returns_line_1_from_delta", func(t *testing.T) {
+		// Mock zoekt returns nothing for "bar" (old content didn't have it).
+		// Delta has "bar" on line 1.
+		matches := search(t, rapidURL, "bar")
+		if len(matches) != 1 {
+			t.Fatalf("expected 1 match for 'bar', got %d: %+v", len(matches), matches)
+		}
+		if matches[0].Line != 1 {
+			t.Errorf("expected match on line 1, got line %d", matches[0].Line)
+		}
+		if matches[0].Content != "bar" {
+			t.Errorf("expected content 'bar', got %q", matches[0].Content)
+		}
+	})
+
+	t.Run("clean_file_still_returned_from_zoekt", func(t *testing.T) {
+		// Mock zoekt also returns a match for "foo" in clean.txt (not dirty).
+		// This should pass through unfiltered.
+		matches := search(t, rapidURL, "foo")
+		hasClean := false
+		for _, m := range matches {
+			if m.File == "clean.txt" {
+				hasClean = true
+			}
+		}
+		if !hasClean {
+			t.Error("expected zoekt result for clean.txt to pass through")
+		}
+	})
+}
+
+// startMockZoektWithStaleResults returns a mock zoekt that:
+//   - /api/list: reports the repo with name=repoName, source=repoPath
+//   - /api/search for "foo": returns 2 matches in test.txt (lines 1 and 2)
+//     PLUS 1 match in clean.txt (not dirty, should pass through)
+//   - /api/search for anything else: returns empty
+func startMockZoektWithStaleResults(t *testing.T, repoName, repoPath string) string {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/list", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"List":{"Repos":[{"Repository":{"Name":%q,"Source":%q,"Branches":[{"Name":"HEAD","Version":"abc123"}]}}]}}`,
+			repoName, repoPath)
+	})
+
+	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Q string `json:"q"` }
+		json.NewDecoder(r.Body).Decode(&req)
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if strings.Contains(req.Q, "foo") {
+			// Return stale results: "foo" on lines 1 and 2 of test.txt (old content)
+			// Plus a result in clean.txt that should not be suppressed.
+			line1 := base64.StdEncoding.EncodeToString([]byte("foo\n"))
+			cleanLine := base64.StdEncoding.EncodeToString([]byte("foo in clean file\n"))
+			fmt.Fprintf(w, `{"Result":{"Files":[
+				{"Repository":%q,"FileName":"test.txt","LineMatches":[
+					{"Line":%q,"LineNumber":1,"LineFragments":[{"LineOffset":0,"MatchLength":3}]},
+					{"Line":%q,"LineNumber":2,"LineFragments":[{"LineOffset":0,"MatchLength":3}]}
+				]},
+				{"Repository":%q,"FileName":"clean.txt","LineMatches":[
+					{"Line":%q,"LineNumber":1,"LineFragments":[{"LineOffset":0,"MatchLength":3}]}
+				]}
+			],"FileCount":100,"MatchCount":3}}`,
+				repoName, line1, line1,
+				repoName, cleanLine)
+		} else {
+			fmt.Fprint(w, `{"Result":{"Files":null,"FileCount":100,"MatchCount":0}}`)
+		}
+	})
+
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(listener)
+	t.Cleanup(func() { srv.Close() })
+	return fmt.Sprintf("http://localhost:%d", listener.Addr().(*net.TCPAddr).Port)
+}
+
 // --- Helpers ---
 
 func initGitRepo(t *testing.T, dir string) {
