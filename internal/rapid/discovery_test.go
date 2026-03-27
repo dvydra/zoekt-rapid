@@ -92,6 +92,27 @@ func TestDiscoverRepos_ExcludePatterns(t *testing.T) {
 	}
 }
 
+func TestDiscoverRepos_ExcludeDefaultPatterns(t *testing.T) {
+	root := t.TempDir()
+
+	mkGitRepo(t, filepath.Join(root, "good-repo"))
+	mkGitRepo(t, filepath.Join(root, "node_modules"))
+	mkGitRepo(t, filepath.Join(root, "vendor"))
+
+	// Use the default glob-style patterns from config.
+	defaultPatterns := []string{"*/node_modules/*", "*/vendor/*", "*/.terraform/*"}
+	repos, err := DiscoverRepos([]string{root}, 3, defaultPatterns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo (excluded node_modules+vendor), got %d: %v", len(repos), repos)
+	}
+	if filepath.Base(repos[0]) != "good-repo" {
+		t.Fatalf("unexpected repo: %v", repos[0])
+	}
+}
+
 func TestDiscoverRepos_MissingRoot(t *testing.T) {
 	repos, err := DiscoverRepos([]string{"/nonexistent/path"}, 3, nil)
 	if err != nil {

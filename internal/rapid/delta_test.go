@@ -105,7 +105,7 @@ func TestDeltaIndex_Search(t *testing.T) {
 	idx := BuildDeltaIndex(root, dirty)
 
 	// Search for "handleAuth" — should match only a.go.
-	matches, err := idx.Search("handleAuth")
+	matches, err := idx.Search("handleAuth", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestDeltaIndex_Search(t *testing.T) {
 	}
 
 	// Search for "handle" — should match both.
-	matches, err = idx.Search("handle")
+	matches, err = idx.Search("handle", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestDeltaIndex_SearchRegex(t *testing.T) {
 	dirty := []DirtyFile{{Path: "a.go", Status: FileModified}}
 	idx := BuildDeltaIndex(root, dirty)
 
-	matches, err := idx.Search("foo\\d+bar")
+	matches, err := idx.Search("foo\\d+bar", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestDeltaIndex_SearchNoMatches(t *testing.T) {
 	dirty := []DirtyFile{{Path: "a.go", Status: FileModified}}
 	idx := BuildDeltaIndex(root, dirty)
 
-	matches, err := idx.Search("nonexistent")
+	matches, err := idx.Search("nonexistent", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestDeltaIndex_SearchNoMatches(t *testing.T) {
 func TestDeltaIndex_NilSafe(t *testing.T) {
 	var idx *DeltaIndex
 
-	matches, err := idx.Search("test")
+	matches, err := idx.Search("test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

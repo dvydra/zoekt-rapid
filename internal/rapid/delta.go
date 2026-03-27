@@ -78,12 +78,23 @@ func BuildDeltaIndex(repoPath string, dirty []DirtyFile) *DeltaIndex {
 }
 
 // Search queries the delta index with a regex pattern and returns matches.
-func (d *DeltaIndex) Search(pattern string) ([]DeltaMatch, error) {
+// If query is non-nil, file filters from it are applied.
+func (d *DeltaIndex) Search(pattern string, query *ParsedQuery) ([]DeltaMatch, error) {
 	if d == nil || len(d.Files) == 0 {
 		return nil, nil
 	}
 
-	re, err := regexp.Compile(pattern)
+	if pattern == "" {
+		return nil, nil
+	}
+
+	// Apply case-insensitivity if the query doesn't require case sensitivity.
+	compilePattern := pattern
+	if query != nil && !query.CaseSensitive {
+		compilePattern = "(?i)" + pattern
+	}
+
+	re, err := regexp.Compile(compilePattern)
 	if err != nil {
 		return nil, fmt.Errorf("invalid regex: %w", err)
 	}
@@ -111,6 +122,11 @@ func (d *DeltaIndex) Search(pattern string) ([]DeltaMatch, error) {
 	// Full regex verification.
 	var matches []DeltaMatch
 	for _, path := range candidates {
+		// Apply file filter if present.
+		if query != nil && !query.MatchesFileFilter(path) {
+			continue
+		}
+
 		data, ok := d.Files[path]
 		if !ok {
 			continue
@@ -153,8 +169,8 @@ func searchInFile(path string, data []byte, re *regexp.Regexp) []DeltaMatch {
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
-		loc := re.FindStringIndex(line)
-		if loc != nil {
+		locs := re.FindAllStringIndex(line, -1)
+		for _, loc := range locs {
 			matches = append(matches, DeltaMatch{
 				Path:       path,
 				LineNumber: lineNum,

@@ -49,7 +49,7 @@ make install
 ### Prerequisites
 
 - [zoekt](https://github.com/sourcegraph/zoekt) — `zoekt-webserver` running on `:6070` (default)
-- Go 1.22+
+- Go 1.26+
 
 ## Usage
 
@@ -71,6 +71,9 @@ zoekt-vanzelf reindex
 
 # Re-scan for new/removed repos
 zoekt-vanzelf rescan
+
+# Print version
+zoekt-vanzelf version
 ```
 
 ### Flags

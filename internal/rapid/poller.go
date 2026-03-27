@@ -3,6 +3,7 @@ package rapid
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -13,10 +14,27 @@ type Poller struct {
 	Reindex *ReindexManager // nil if reindex not wired up (e.g. poll-only mode)
 	Proxy   *SearchProxy    // nil if proxy not wired up (e.g. poll-only mode)
 	Watcher *Watcher        // nil if fsnotify not available
+
+	// Per-repo locks to prevent concurrent pollRepo calls from the
+	// poll ticker and the fsnotify watcher.
+	repoMu   sync.Mutex
+	repoLocks map[string]*sync.Mutex
 }
 
 func NewPoller(cfg Config, state *StateTable) *Poller {
-	return &Poller{config: cfg, state: state}
+	return &Poller{config: cfg, state: state, repoLocks: make(map[string]*sync.Mutex)}
+}
+
+// repoLock returns a per-repo mutex, creating one if needed.
+func (p *Poller) repoLock(path string) *sync.Mutex {
+	p.repoMu.Lock()
+	defer p.repoMu.Unlock()
+	mu, ok := p.repoLocks[path]
+	if !ok {
+		mu = &sync.Mutex{}
+		p.repoLocks[path] = mu
+	}
+	return mu
 }
 
 // Run starts the polling loop. It blocks until ctx is cancelled.
@@ -80,6 +98,10 @@ func (p *Poller) pollAll() {
 }
 
 func (p *Poller) pollRepo(path string) {
+	mu := p.repoLock(path)
+	mu.Lock()
+	defer mu.Unlock()
+
 	bh, err := GetBranchAndHead(path)
 	if err != nil {
 		log.Printf("[%s] git error: %v", path, err)
@@ -136,9 +158,14 @@ func (p *Poller) pollRepo(path string) {
 	}
 
 	if needsReindex && p.Reindex != nil {
-		// Destroy delta — it's relative to the old HEAD.
-		p.state.SetDelta(path, nil)
 		p.state.SetStatus(path, RepoStale)
+		if p.config.ReindexGapMode == "blackout" {
+			// Destroy delta immediately — searches will miss dirty files during reindex.
+			p.state.SetDelta(path, nil)
+		}
+		// In "stale" mode (default), keep the old delta so searches still return
+		// results during reindex. The delta may be slightly wrong (relative to old
+		// HEAD), but that's better than a gap. Reindex completion rebuilds it.
 		p.Reindex.TriggerReindex(path)
 	} else {
 		// Rebuild delta index if dirty files changed.
@@ -149,6 +176,10 @@ func (p *Poller) pollRepo(path string) {
 			// Check delta threshold — trigger early reindex if too large.
 			if p.Reindex != nil && p.deltaExceedsThreshold(len(dirty), delta) {
 				log.Printf("[%s] delta exceeds threshold (%d files), triggering early reindex", path, len(dirty))
+				p.state.SetStatus(path, RepoStale)
+				if p.config.ReindexGapMode == "blackout" {
+					p.state.SetDelta(path, nil)
+				}
 				p.Reindex.TriggerReindex(path)
 			}
 		} else if len(dirty) == 0 {

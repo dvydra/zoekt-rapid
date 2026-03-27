@@ -78,11 +78,14 @@ func TestParsePorcelainV2_Rename(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 1 {
-		t.Fatalf("expected 1 file, got %d", len(files))
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files (new + old tombstone), got %d: %+v", len(files), files)
 	}
-	if files[0].Status != FileRenamed {
-		t.Errorf("status = %v, want renamed", files[0].Status)
+	if files[0].Path != "new.go" || files[0].Status != FileRenamed {
+		t.Errorf("files[0] = %+v, want new.go/renamed", files[0])
+	}
+	if files[1].Path != "old.go" || files[1].Status != FileDeleted {
+		t.Errorf("files[1] = %+v, want old.go/deleted", files[1])
 	}
 }
 

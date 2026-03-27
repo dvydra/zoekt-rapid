@@ -140,8 +140,8 @@ func (p *SearchProxy) IndexedSHA(repoPath string) string {
 // Search forwards a query to zoekt and merges delta index results.
 // Works with raw JSON to preserve all fields zoekt returns.
 // reqBody is the raw request JSON to forward to zoekt.
-// query is extracted for delta search. useChunkMatches controls delta result format.
-func (p *SearchProxy) Search(reqBody []byte, query string, useChunkMatches bool) (*ZoektSearchResponse, error) {
+// rawQuery is the zoekt query string for delta search. useChunkMatches controls delta result format.
+func (p *SearchProxy) Search(reqBody []byte, rawQuery string, useChunkMatches bool) (*ZoektSearchResponse, error) {
 	// Forward raw request to zoekt.
 	rawResp, err := p.queryZoektRaw(reqBody)
 	if err != nil {
@@ -204,13 +204,16 @@ func (p *SearchProxy) Search(reqBody []byte, query string, useChunkMatches bool)
 		filteredFiles = append(filteredFiles, fileRaw)
 	}
 
+	// Parse zoekt query to extract the search pattern and filters for delta search.
+	pq := ParseZoektQuery(rawQuery)
+
 	// Add delta matches for all repos that have deltas.
 	for path, state := range allStates {
 		if state.DeltaIndex == nil || len(state.DeltaIndex.Files) == 0 {
 			continue
 		}
 
-		deltaMatches, err := state.DeltaIndex.Search(query)
+		deltaMatches, err := state.DeltaIndex.Search(pq.Pattern, &pq)
 		if err != nil || len(deltaMatches) == 0 {
 			continue
 		}
@@ -235,7 +238,8 @@ func (p *SearchProxy) Search(reqBody []byte, query string, useChunkMatches bool)
 	}
 
 	result["Files"] = filteredFiles
-	result["FileCount"] = len(filteredFiles)
+	// Don't overwrite FileCount — zoekt's FileCount means total files searched,
+	// not the number of matching files. Let the original value stand.
 	rawResp["Result"] = result
 
 	return &ZoektSearchResponse{raw: rawResp}, nil

@@ -119,11 +119,11 @@ func ParsePorcelainV2(data []byte) ([]DirtyFile, error) {
 			files = append(files, f)
 
 		case '2': // rename or copy entry
-			f, err := parseRenameEntry(line)
+			rf, err := parseRenameEntry(line)
 			if err != nil {
 				continue
 			}
-			files = append(files, f)
+			files = append(files, rf...)
 
 		case 'u': // unmerged entry
 			f, err := parseUnmergedEntry(line)
@@ -166,20 +166,32 @@ func parseOrdinaryEntry(line []byte) (DirtyFile, error) {
 
 // parseRenameEntry parses a porcelain v2 "2" line.
 // Format: 2 XY sub mH mI mW hH hI Xscore <path>\t<origPath>
-func parseRenameEntry(line []byte) (DirtyFile, error) {
-	// The path field may contain a tab separating path and origPath.
-	fields := bytes.Fields(line)
+// Returns two dirty files: the new path (renamed) and the old path (deleted).
+func parseRenameEntry(line []byte) ([]DirtyFile, error) {
+	// The last portion after the 9th space-separated field is "<newpath>\t<oldpath>".
+	// We can't use bytes.Fields because it splits on tabs too.
+	// Instead, split on tab first to separate paths, then parse the prefix.
+	tabIdx := bytes.IndexByte(line, '\t')
+	if tabIdx < 0 {
+		return nil, fmt.Errorf("malformed rename entry (no tab): %s", line)
+	}
+
+	prefix := line[:tabIdx]  // "2 XY sub mH mI mW hH hI Xscore <newpath>"
+	origPath := string(bytes.TrimSpace(line[tabIdx+1:]))
+
+	fields := bytes.Fields(prefix)
 	if len(fields) < 10 {
-		return DirtyFile{}, fmt.Errorf("malformed rename entry: %s", line)
+		return nil, fmt.Errorf("malformed rename entry: %s", line)
 	}
+	newPath := string(fields[9])
 
-	pathField := string(fields[9])
-	// Take the new path (before tab).
-	if idx := strings.IndexByte(pathField, '\t'); idx >= 0 {
-		pathField = pathField[:idx]
+	result := []DirtyFile{
+		{Path: newPath, Status: FileRenamed},
 	}
-
-	return DirtyFile{Path: pathField, Status: FileRenamed}, nil
+	if origPath != "" && origPath != newPath {
+		result = append(result, DirtyFile{Path: origPath, Status: FileDeleted})
+	}
+	return result, nil
 }
 
 // parseUnmergedEntry parses a porcelain v2 "u" line.

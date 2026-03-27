@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // DiscoverRepos walks each root directory up to scanDepth levels looking for
@@ -103,15 +104,39 @@ func depthFrom(root, dir string) int {
 }
 
 func matchesAny(path string, patterns []string) bool {
+	// Check if any segment of the path matches a pattern.
+	// Patterns like "*/node_modules/*" mean "contains node_modules as a segment".
+	// We extract bare directory names from patterns and check path segments.
 	for _, pattern := range patterns {
-		matched, err := filepath.Match(pattern, path)
-		if err == nil && matched {
+		// Try direct filepath.Match first (works for simple patterns).
+		if matched, err := filepath.Match(pattern, path); err == nil && matched {
 			return true
 		}
-		// Also try matching against just the base name and relative components.
-		base := filepath.Base(path)
-		matched, err = filepath.Match(pattern, base)
-		if err == nil && matched {
+		// Extract the core directory name from patterns like "*/node_modules/*".
+		name := extractDirName(pattern)
+		if name != "" && containsSegment(path, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractDirName extracts a bare directory name from patterns like "*/node_modules/*"
+// or "*/.terraform/*". Returns empty string if the pattern isn't in this form.
+func extractDirName(pattern string) string {
+	pattern = strings.TrimPrefix(pattern, "*/")
+	pattern = strings.TrimSuffix(pattern, "/*")
+	// Only return if it's now a simple name (no wildcards or separators).
+	if strings.ContainsAny(pattern, "*?[/") {
+		return ""
+	}
+	return pattern
+}
+
+// containsSegment returns true if any path segment equals name.
+func containsSegment(path, name string) bool {
+	for _, seg := range strings.Split(path, string(filepath.Separator)) {
+		if seg == name {
 			return true
 		}
 	}
