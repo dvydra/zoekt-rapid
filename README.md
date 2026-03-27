@@ -34,22 +34,61 @@ On every search request, zoekt-vanzelf forwards the query to zoekt, then **suppr
 
 ## Install
 
-```sh
-go install github.com/dvydra/zoekt-vanzelf/cmd/zoekt-vanzelf@latest
-```
-
-Or build from source:
+The installer sets up the full stack: zoekt, zoekt-vanzelf, initial index, and macOS launchd agents.
 
 ```sh
 git clone https://github.com/dvydra/zoekt-vanzelf
 cd zoekt-vanzelf
-make install
+./install.sh
+```
+
+This will:
+1. Install `zoekt-webserver` and `zoekt-git-index` from [sourcegraph/zoekt](https://github.com/sourcegraph/zoekt)
+2. Build and install `zoekt-vanzelf`
+3. Index all git repos under `~/src` (first run only)
+4. Create and start launchd agents so everything runs on login and auto-restarts
+
+After install, verify with:
+```sh
+zoekt-vanzelf status
 ```
 
 ### Prerequisites
 
-- [zoekt](https://github.com/sourcegraph/zoekt) — `zoekt-webserver` running on `:6070` (default)
-- Go 1.26+
+- **Go 1.26+** — install from [go.dev](https://go.dev/dl/) or `brew install go`
+- **macOS** — the installer uses launchd for service management
+- **git repos under `~/src`** — this is the default root; configurable via `--roots`
+
+### Manual install
+
+If you prefer to install the pieces yourself:
+
+```sh
+# Install zoekt (the base search engine)
+go install github.com/sourcegraph/zoekt/cmd/zoekt-webserver@latest
+go install github.com/sourcegraph/zoekt/cmd/zoekt-git-index@latest
+
+# Start zoekt-webserver
+zoekt-webserver -index ~/.zoekt -listen :6070 -rpc
+
+# Index your repos (repeat for each repo, or let zoekt-vanzelf handle it)
+zoekt-git-index -index ~/.zoekt ~/src/myproject
+
+# Install zoekt-vanzelf
+go install github.com/dvydra/zoekt-vanzelf/cmd/zoekt-vanzelf@latest
+
+# Start the proxy
+zoekt-vanzelf serve
+```
+
+### Optional: web UI
+
+[neogrok](https://github.com/nicholasgasior/neogrok) provides a browser-based search interface. Point it at zoekt-vanzelf to get live working tree search in the browser:
+
+```sh
+npm install -g neogrok
+ZOEKT_URL=http://localhost:6071 PORT=3000 neogrok
+```
 
 ## Usage
 
@@ -115,13 +154,26 @@ On search:
 
 This means zoekt handles the heavy lifting (searching millions of lines across all repos) while zoekt-vanzelf patches in just the handful of files you've touched since your last commit.
 
-## macOS launchd setup
+## macOS launchd agents
 
-To run as background services, create plist files in `~/Library/LaunchAgents/`:
+The installer creates two launchd agents in `~/Library/LaunchAgents/`:
+
+| Agent | Label | Service | Log |
+|-------|-------|---------|-----|
+| `com.zoekt.serve.plist` | zoekt-webserver on `:6070` | Base trigram index | `/tmp/zoekt-serve.log` |
+| `com.zoekt.vanzelf.plist` | zoekt-vanzelf on `:6071` | Proxy with live deltas | `/tmp/zoekt-vanzelf.log` |
+
+Both are set to `RunAtLoad` + `KeepAlive` — they start on login and restart if they crash.
 
 ```sh
-# com.zoekt.vanzelf.plist — zoekt-vanzelf on :6071
-# com.zoekt.serve.plist — zoekt-webserver on :6070
+# Restart zoekt-vanzelf
+launchctl kickstart -k gui/$(id -u)/com.zoekt.vanzelf
+
+# Stop it
+launchctl kill SIGTERM gui/$(id -u)/com.zoekt.vanzelf
+
+# View logs
+tail -f /tmp/zoekt-vanzelf.log
 ```
 
 ## Project layout

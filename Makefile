@@ -1,4 +1,4 @@
-.PHONY: build test install vet
+.PHONY: build test install setup vet
 
 build:
 	go build -o zoekt-vanzelf ./cmd/zoekt-vanzelf
@@ -8,6 +8,9 @@ test:
 
 install:
 	go install ./cmd/zoekt-vanzelf
+
+setup: install
+	./install.sh
 
 vet:
 	go vet ./...
